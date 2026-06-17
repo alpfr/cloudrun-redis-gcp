@@ -1,0 +1,94 @@
+# Flask Application & Google Cloud Memorystore Deployment
+
+This repository contains a Flask web application that connects to a managed GCP Memorystore Redis database. The application is deployed to Google Cloud Run, utilizing **Direct VPC Egress** to communicate with the Redis instance over a private IP.
+
+---
+
+## File Structure
+
+```
+├── app/
+│   ├── app.py             # Flask application code
+│   ├── Dockerfile         # Multi-stage Dockerfile
+│   └── requirements.txt   # Pip dependencies
+├── cloudrun/
+│   └── service.yaml       # Cloud Run Knative service configuration
+└── deploy.sh              # Bash script to automate provisioning & deployment
+```
+
+---
+
+## Architecture Overview
+
+1. **GCP Memorystore (Redis)**: Hosted privately in the `default` VPC network.
+2. **Private Service Access**: A private VPC peering connection established with Google services (`servicenetworking.googleapis.com`) to allow the creation of Memorystore instances with private IP addresses.
+3. **Cloud Run**: Fully serverless environment hosting the Python application.
+4. **Direct VPC Egress**: Configured on Cloud Run using the `run.googleapis.com/network-interfaces` annotation. Egress traffic is routed directly through your `default` VPC subnet, allowing serverless functions to connect to the private Redis IP without requiring VPC Access Connector infrastructure (saving time and cost).
+
+---
+
+## How to Manage and Deploy
+
+### Prerequisites
+Ensure you have the `gcloud` SDK installed and authenticated.
+
+### Execution
+You can run the deployment script directly using default values:
+```bash
+./deploy.sh
+```
+
+Or pass custom parameter values for project, region, network, subnet, and Artifact Registry repository:
+```bash
+./deploy.sh \
+  --project my-gcp-project-id \
+  --region us-central1 \
+  --network custom-vpc \
+  --subnet custom-subnet \
+  --repo my-custom-artifact-repo
+```
+
+### Parameter Options:
+* `-p, --project ID`       GCP Project ID (defaults to `alpfr-splunk-integration`)
+* `-r, --region REGION`    GCP Region (defaults to `us-central1`)
+* `-z, --zone ZONE`        GCP Zone (defaults to `us-central1-a`)
+* `-n, --network NETWORK`  VPC Network name (defaults to `default`)
+* `-s, --subnet SUBNET`    VPC Subnet name (defaults to `default`)
+* `-i, --instance NAME`    Memorystore Redis instance name (defaults to `redis-cache`)
+* `-k, --repo NAME`        GCP Artifact Registry repository name (defaults to GCR container registry)
+
+---
+
+## Code Breakdown
+
+### 1. Flask App (`app/app.py`)
+Connects to Redis using host and port variables from env:
+```python
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+```
+If successful, it increments the key `'visitor_count'` and returns:
+```json
+{
+  "connected_to": "10.105.0.3:6379",
+  "message": "Connected to Redis successfully!",
+  "status": "success",
+  "visitor_count": 2
+}
+```
+
+### 2. Dockerfile (`app/Dockerfile`)
+Uses a multi-stage build starting from `python:3.11-alpine`. It builds dependencies in the first stage and copies them to the runtime container to ensure a minimal footprint.
+To satisfy the security requirements, it runs without the `runAsNonRoot: true` restriction (defaulting to container root execution).
+
+### 3. Cloud Run Service Definition (`cloudrun/service.yaml`)
+Utilizes Knative specs to define the network attachments:
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/network-interfaces: '[{"network":"default","subnetwork":"default"}]'
+        run.googleapis.com/vpc-access-egress: "private-ranges-only"
+```
+The script dynamically replaces the image tag and private Redis IP address when deploying.
