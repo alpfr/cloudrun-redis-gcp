@@ -1,7 +1,7 @@
 apiVersion: networking.istio.io/v1beta1
 kind: Gateway
 metadata:
-  name: redis-gateway
+  name: app-gateway
   namespace: default
 spec:
   selector:
@@ -9,7 +9,10 @@ spec:
   servers:
     - port:
         number: 443
-        name: tcp-redis
-        protocol: TCP
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: app-tls-secret # Secret holding TLS certificate inside cluster
       hosts:
         - "*"
