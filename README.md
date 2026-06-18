@@ -36,7 +36,8 @@ This repository contains configurations and deployment scripts to run a Flask we
 │   └── deploy.sh          # EKS deployment automation script
 ├── gcp-cloudbuild/
 │   └── cloudbuild.yaml    # CI/CD Cloud Build config
-└── deploy.sh              # Cloud Run deployment automation script
+├── deploy.sh              # Cloud Run deployment automation script
+├── gcp-provision-redis.sh # Script to ONLY provision Memorystore Redis
 ```
 
 ---
