@@ -106,6 +106,16 @@ kubectl apply -f service.yaml
 kubectl apply -f statefulset.yaml
 kubectl apply -f "$TEMP_DEPLOYMENT_YAML"
 
+# Apply cert-manager Issuer and Certificate (Requires cert-manager to be installed)
+echo "Checking and applying cert-manager configurations..."
+if kubectl get crd certificates.cert-manager.io &>/dev/null; then
+    kubectl apply -f issuer.yaml
+    kubectl apply -f certificate.yaml
+    echo "cert-manager Issuer and Certificate applied."
+else
+    echo "Warning: cert-manager CRDs are not installed in the cluster. Skipping certificate manifests."
+fi
+
 # Apply Gateway/VirtualService (Requires Istio to be installed in the EKS cluster)
 echo "Checking and applying Istio configurations..."
 if kubectl get crd gateways.networking.istio.io &>/dev/null; then

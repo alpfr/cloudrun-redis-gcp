@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: app-certificate
+  namespace: default
+spec:
+  secretName: app-tls-secret # Must match credentialName in gateway.yaml
+  issuerRef:
+    name: selfsigned-issuer
+    kind: Issuer
+  commonName: your-domain.com # Replace with your domain name
+  dnsNames:
+    - your-domain.com
+    - www.your-domain.com
