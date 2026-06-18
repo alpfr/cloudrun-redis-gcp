@@ -99,12 +99,12 @@ The script dynamically replaces the image tag and private Redis IP address when 
 
 ## CI/CD Deployment using GCP Cloud Build
 
-We have included a `cloudbuild.yaml` file to automate compilation and deployment through Google Cloud Build.
+We have included a `cloudbuild.yaml` file under the `gcp-cloudbuild/` directory to automate compilation and deployment through Google Cloud Build.
 
 ### 1. Manual Invocation
 To trigger the build and deployment pipeline manually from your local command line:
 ```bash
-gcloud builds submit --config=cloudbuild.yaml .
+gcloud builds submit --config=gcp-cloudbuild/cloudbuild.yaml .
 ```
 
 ### 2. Automated Git Triggers (CI/CD)
@@ -114,7 +114,7 @@ To set up continuous deployment upon pushing to your GitHub repository:
 3. Link your GitHub repository `https://github.com/alpfr/cloudrun-redis-gcp.git`.
 4. Set the event type to **Push to a branch** (select `main`).
 5. Select **Cloud Build configuration file (yaml)** as the configuration type.
-6. Set the path to `cloudbuild.yaml`.
+6. Set the path to `gcp-cloudbuild/cloudbuild.yaml`.
 7. Click **Create**.
 Now, any git push to `main` will automatically build your image, verify/provision Memorystore, and update your Cloud Run service!
 
