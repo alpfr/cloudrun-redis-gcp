@@ -38,14 +38,15 @@ You can run the deployment script directly using default values:
 ./deploy.sh
 ```
 
-Or pass custom parameter values for project, region, network, subnet, and Artifact Registry repository:
+Or pass custom parameter values for project, region, network, subnet, Artifact Registry, and enable the HTTP Load Balancer:
 ```bash
 ./deploy.sh \
   --project my-gcp-project-id \
   --region us-central1 \
   --network custom-vpc \
   --subnet custom-subnet \
-  --repo my-custom-artifact-repo
+  --repo my-custom-artifact-repo \
+  --load-balancer
 ```
 
 ### Parameter Options:
@@ -56,6 +57,7 @@ Or pass custom parameter values for project, region, network, subnet, and Artifa
 * `-s, --subnet SUBNET`    VPC Subnet name (defaults to `default`)
 * `-i, --instance NAME`    Memorystore Redis instance name (defaults to `redis-cache`)
 * `-k, --repo NAME`        GCP Artifact Registry repository name (defaults to GCR container registry)
+* `-l, --load-balancer`    Enable Global HTTP Load Balancer with Serverless NEG (defaults to `false`)
 
 ---
 
