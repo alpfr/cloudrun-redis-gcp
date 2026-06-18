@@ -1,0 +1,23 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: filestore-sc
+provisioner: filestore.csi.storage.gke.io
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+parameters:
+  tier: standard # standard, premium, enterprise, etc.
+  network: default # replace with your VPC network name if different
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: filestore-sc
+  resources:
+    requests:
+      storage: 1Ti # GKE Filestore standard tier requires a minimum of 1Ti (or 1024Gi)

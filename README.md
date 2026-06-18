@@ -1,6 +1,8 @@
-# Flask Application & Google Cloud Memorystore Deployment
+# Flask Application & GCP Redis Deployments (Cloud Run + GKE)
 
-This repository contains a Flask web application that connects to a managed GCP Memorystore Redis database. The application is deployed to Google Cloud Run, utilizing **Direct VPC Egress** to communicate with the Redis instance over a private IP.
+This repository contains configurations and deployment scripts to run a Flask web application connected to a Redis database on GCP. It supports two target environments:
+1. **Google Cloud Run (Recommended)**: Serverless app hosting connected to a managed GCP Memorystore Redis database via Direct VPC Egress.
+2. **GCP GKE (Google Kubernetes Engine)**: App Deployment and a self-hosted Redis StatefulSet using Google Filestore for dynamic ReadWriteMany storage.
 
 ---
 
@@ -13,7 +15,18 @@ This repository contains a Flask web application that connects to a managed GCP 
 │   └── requirements.txt   # Pip dependencies
 ├── cloudrun/
 │   └── service.yaml       # Cloud Run Knative service configuration
-└── deploy.sh              # Bash script to automate provisioning & deployment
+├── gke/
+│   ├── storage.yaml       # GKE Filestore StorageClass & PVC
+│   ├── configmap.yaml     # Redis configmap
+│   ├── service.yaml       # Headless & ClusterIP Services
+│   ├── statefulset.yaml   # Redis StatefulSet (no runAsNonRoot used)
+│   ├── gateway.yaml       # Istio Gateway
+│   ├── virtualservice.yaml# Istio VirtualService
+│   ├── app-deployment.yaml# Flask App Deployment & Service
+│   └── deploy.sh          # GKE deployment automation script
+├── gcp-cloudbuild/
+│   └── cloudbuild.yaml    # CI/CD Cloud Build config
+└── deploy.sh              # Cloud Run deployment automation script
 ```
 
 ---
@@ -124,4 +137,32 @@ Now, any git push to `main` will automatically build your image, verify/provisio
 > * `roles/redis.admin` (Cloud Memorystore Admin)
 > * `roles/compute.networkAdmin` (VPC Network/PSA Admin)
 > * `roles/iam.serviceAccountUser` (ActAs role for deployment)
+
+---
+
+## Alternative Deployment: GCP GKE (Google Kubernetes Engine)
+
+If you need to deploy the application inside a Kubernetes cluster:
+
+### GKE Execution
+Navigate to the `gke/` folder and execute the deployment script. The GKE cluster name is required:
+```bash
+cd gke
+./deploy.sh --cluster my-gke-cluster --zone us-central1-a
+```
+
+### Parameter Options:
+* `-c, --cluster NAME`     GKE Cluster Name (Required)
+* `-p, --project ID`       GCP Project ID (defaults to `alpfr-splunk-integration`)
+* `-r, --region REGION`    GCP Region (defaults to `us-central1`)
+* `-z, --zone ZONE`        GCP Zone (defaults to `us-central1-a`)
+* `-k, --repo NAME`        GCP Artifact Registry repository name (defaults to GCR container registry)
+
+### What the GKE deploy script does:
+1. **Enables APIs**: Compute, Kubernetes Engine, Cloud Build, and Filestore APIs.
+2. **Cluster Authentication**: Retrieves `kubectl` credentials for the GKE cluster.
+3. **Builds Container**: Submits the Flask application to Cloud Build, compiling it into a Docker image.
+4. **Applies Manifests**: Deploys the GKE StorageClass (Filestore), PVC, ConfigMap, headless/standard Services, Redis StatefulSet, and the Flask application.
+5. **Applies Istio Routing**: Configures the Istio Gateway and VirtualService (if Istio is installed in the GKE cluster).
+
 
