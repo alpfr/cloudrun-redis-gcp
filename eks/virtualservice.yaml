@@ -1,18 +1,18 @@
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
-  name: app-virtualservice
+  name: redis-virtualservice
   namespace: default
 spec:
   hosts:
     - "*"
   gateways:
-    - app-gateway
-  http:
+    - redis-gateway
+  tcp:
     - match:
         - port: 443
       route:
         - destination:
-            host: flask-app-service
+            host: redis
             port:
-              number: 80
+              number: 6379
