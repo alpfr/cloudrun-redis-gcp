@@ -1,8 +1,9 @@
-# Flask Application & GCP Redis Deployments (Cloud Run + GKE)
+# Flask Application & Redis Deployments (Cloud Run + GKE + EKS)
 
-This repository contains configurations and deployment scripts to run a Flask web application connected to a Redis database on GCP. It supports two target environments:
+This repository contains configurations and deployment scripts to run a Flask web application connected to a Redis database on GCP or AWS. It supports three target environments:
 1. **Google Cloud Run (Recommended)**: Serverless app hosting connected to a managed GCP Memorystore Redis database via Direct VPC Egress.
 2. **GCP GKE (Google Kubernetes Engine)**: App Deployment and a self-hosted Redis StatefulSet using Google Filestore for dynamic ReadWriteMany storage.
+3. **AWS EKS (Elastic Kubernetes Service)**: App Deployment and a self-hosted Redis StatefulSet using AWS EFS for PVC storage, running over custom port layouts (VirtualService on 443, Redis Service on 6379).
 
 ---
 
@@ -24,6 +25,15 @@ This repository contains configurations and deployment scripts to run a Flask we
 │   ├── virtualservice.yaml# Istio VirtualService
 │   ├── app-deployment.yaml# Flask App Deployment & Service
 │   └── deploy.sh          # GKE deployment automation script
+├── eks/
+│   ├── storage.yaml       # EKS EFS StorageClass & PVC
+│   ├── configmap.yaml     # Redis configmap
+│   ├── service.yaml       # Headless & ClusterIP Services (port 6379)
+│   ├── statefulset.yaml   # Redis StatefulSet (no runAsNonRoot used)
+│   ├── gateway.yaml       # Istio Gateway (port 443 HTTPS TLS)
+│   ├── virtualservice.yaml# Istio VirtualService (listening on port 443)
+│   ├── app-deployment.yaml# Flask App Deployment & Service
+│   └── deploy.sh          # EKS deployment automation script
 ├── gcp-cloudbuild/
 │   └── cloudbuild.yaml    # CI/CD Cloud Build config
 └── deploy.sh              # Cloud Run deployment automation script
@@ -165,4 +175,28 @@ cd gke
 4. **Applies Manifests**: Deploys the GKE StorageClass (Filestore), PVC, ConfigMap, headless/standard Services, Redis StatefulSet, and the Flask application.
 5. **Applies Istio Routing**: Configures the Istio Gateway and VirtualService (if Istio is installed in the GKE cluster).
 
+---
 
+## Alternative Deployment: AWS EKS (Elastic Kubernetes Service)
+
+If you need to deploy the application inside an AWS EKS cluster:
+
+### EKS Execution
+Navigate to the `eks/` folder and execute the deployment script. The EKS cluster name and AWS Account ID are required:
+```bash
+cd eks
+./deploy.sh --cluster my-eks-cluster --account 123456789012 --region us-east-1
+```
+
+### Parameter Options:
+* `-c, --cluster NAME`     EKS Cluster Name (Required)
+* `-a, --account ID`       AWS Account ID (Required for ECR registry URL)
+* `-r, --region REGION`    AWS Region (defaults to `us-east-1`)
+
+### What the EKS deploy script does:
+1. **Cluster Authentication**: Updates local `kubeconfig` for EKS using `aws eks update-kubeconfig`.
+2. **Registry Login**: Authenticates local Docker daemon to Amazon ECR.
+3. **Registry Check/Create**: Verifies or provisions the Amazon ECR repository `flask-redis-app`.
+4. **Builds Container**: Compiles the Flask application container and pushes it to ECR.
+5. **Applies Manifests**: Deploys EKS StorageClass (AWS EFS), PVC, ConfigMap, headless/standard Services (listening on port **6379**), Redis StatefulSet, and the Flask application.
+6. **Applies Istio Routing**: Configures the Istio Gateway and VirtualService (routing incoming traffic on port **443** to the Flask application).
