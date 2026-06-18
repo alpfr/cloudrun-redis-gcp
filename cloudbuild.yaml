@@ -1,0 +1,205 @@
+steps:
+  # Step 1: Build the Flask application container image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-image'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/flask-redis-app:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/flask-redis-app:latest'
+      - 'app/'
+
+  # Step 2: Push the built image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/flask-redis-app:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image-latest'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/flask-redis-app:latest'
+
+  # Step 3: Run Cloud SDK script to configure private network routing, Memorystore Redis, and Cloud Run deployment
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-infrastructure-and-app'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        
+        # --- Configurations ---
+        REGION="us-central1"
+        ZONE="us-central1-a"
+        NETWORK="default"
+        SUBNET="default"
+        REDIS_INSTANCE_NAME="redis-cache"
+        ENABLE_LB="false" # Change to "true" if you want to automatically provision an HTTP Load Balancer
+
+        echo "======================================================================"
+        echo "Preparing deployment inside Cloud Build (Project: $PROJECT_ID)"
+        echo "======================================================================"
+
+        # 1. Enable GCP Services
+        echo "Enabling necessary APIs..."
+        gcloud services enable \
+            compute.googleapis.com \
+            redis.googleapis.com \
+            run.googleapis.com \
+            servicenetworking.googleapis.com
+
+        # 2. Configure Private Service Access (Required for Memorystore)
+        echo "Configuring Private Service Access for network '${NETWORK}'..."
+        if ! gcloud compute addresses describe google-managed-services-"${NETWORK}" --global &>/dev/null; then
+            gcloud compute addresses create google-managed-services-"${NETWORK}" \
+                --global \
+                --purpose=VPC_PEERING \
+                --prefix-length=16 \
+                --network="${NETWORK}"
+            echo "Allocated IP range for Google services."
+        else
+            echo "IP range google-managed-services-${NETWORK} is already allocated."
+        fi
+
+        echo "Establishing VPC Peering with Google services..."
+        if ! gcloud services vpc-peerings list --network="${NETWORK}" 2>/dev/null | grep -q "servicenetworking.googleapis.com"; then
+            gcloud services vpc-peerings connect \
+                --service=servicenetworking.googleapis.com \
+                --ranges=google-managed-services-"${NETWORK}" \
+                --network="${NETWORK}"
+            echo "Private Service Access connection established."
+        else
+            echo "Private Service Access connection already exists."
+        fi
+
+        # 3. Check/Create GCP Memorystore Redis Instance
+        echo "Checking/creating Memorystore Redis instance..."
+        if ! gcloud redis instances describe "${REDIS_INSTANCE_NAME}" --region "${REGION}" &>/dev/null; then
+            gcloud redis instances create "${REDIS_INSTANCE_NAME}" \
+                --size=1 \
+                --region="${REGION}" \
+                --zone="${ZONE}" \
+                --redis-version=redis_7_0 \
+                --network="projects/$PROJECT_ID/global/networks/${NETWORK}" \
+                --connect-mode=private-service-access
+            echo "Memorystore Redis instance created successfully."
+        else
+            echo "Memorystore Redis instance '${REDIS_INSTANCE_NAME}' already exists."
+        fi
+
+        # 4. Retrieve Redis Host IP
+        echo "Retrieving Memorystore IP address..."
+        REDIS_IP=$(gcloud redis instances describe "${REDIS_INSTANCE_NAME}" --region "${REGION}" --format="value(host)")
+        echo "Redis Private IP: ${REDIS_IP}"
+
+        # 5. Update service.yaml with actual values and Deploy to Cloud Run
+        echo "Preparing service.yaml with actual configurations..."
+        TEMP_SERVICE_YAML="cloudrun/service_temp.yaml"
+        IMAGE_TAG="gcr.io/$PROJECT_ID/flask-redis-app:$COMMIT_SHA"
+
+        sed -e "s|gcr.io/alpfr-splunk-integration/flask-redis-app:latest|${IMAGE_TAG}|g" \
+            -e "s|YOUR_PROJECT_ID|$PROJECT_ID|g" \
+            -e "s|YOUR_REGION|${REGION}|g" \
+            -e "s|YOUR_NETWORK|${NETWORK}|g" \
+            -e "s|YOUR_SUBNET|${SUBNET}|g" \
+            -e "s|YOUR_REDIS_IP|${REDIS_IP}|g" \
+            cloudrun/service.yaml > "${TEMP_SERVICE_YAML}"
+
+        echo "Deploying container to Cloud Run..."
+        gcloud beta run services replace "${TEMP_SERVICE_YAML}" --region "${REGION}"
+
+        # Clean up temp file
+        rm -f "${TEMP_SERVICE_YAML}"
+
+        # 6. Public access & ingress routing
+        if [[ "${ENABLE_LB}" == "true" ]]; then
+            echo "Configuring Global HTTP Load Balancer via Serverless NEG..."
+            
+            # Create Serverless NEG
+            if ! gcloud compute network-endpoint-groups describe flask-app-neg --region="${REGION}" &>/dev/null; then
+                gcloud compute network-endpoint-groups create flask-app-neg \
+                    --region="${REGION}" \
+                    --network-endpoint-type=serverless \
+                    --cloud-run-service=flask-redis-app
+            fi
+
+            # Create Backend Service
+            if ! gcloud compute backend-services describe flask-app-backend --global &>/dev/null; then
+                gcloud compute backend-services create flask-app-backend \
+                    --global \
+                    --load-balancing-scheme=EXTERNAL_MANAGED
+            fi
+
+            # Attach Serverless NEG
+            if ! gcloud compute backend-services describe flask-app-backend --global --format="value(backends[0].group)" | grep -q "flask-app-neg"; then
+                gcloud compute backend-services add-backend flask-app-backend \
+                    --global \
+                    --network-endpoint-group=flask-app-neg \
+                    --network-endpoint-group-region="${REGION}"
+            fi
+
+            # Create URL Map
+            if ! gcloud compute url-maps describe flask-app-url-map &>/dev/null; then
+                gcloud compute url-maps create flask-app-url-map --default-service=flask-app-backend
+            fi
+
+            # Create Target HTTP Proxy
+            if ! gcloud compute target-http-proxies describe flask-app-http-proxy &>/dev/null; then
+                gcloud compute target-http-proxies create flask-app-http-proxy --url-map=flask-app-url-map
+            fi
+
+            # Allocate IP
+            if ! gcloud compute addresses describe flask-app-lb-ip --global &>/dev/null; then
+                gcloud compute addresses create flask-app-lb-ip --global --ip-version=IPV4
+            fi
+            LB_IP=$(gcloud compute addresses describe flask-app-lb-ip --global --format="value(address)")
+
+            # Create Forwarding Rule
+            if ! gcloud compute forwarding-rules describe flask-app-http-forwarding-rule --global &>/dev/null; then
+                gcloud compute forwarding-rules create flask-app-http-forwarding-rule \
+                    --global \
+                    --load-balancing-scheme=EXTERNAL_MANAGED \
+                    --target-http-proxy=flask-app-http-proxy \
+                    --ports=80 \
+                    --address=flask-app-lb-ip
+            fi
+
+            # Restrict direct Cloud Run access
+            gcloud run services update flask-redis-app \
+                --ingress=internal-and-cloud-load-balancing \
+                --region="${REGION}"
+
+            echo "======================================================================"
+            echo "Deployment Complete (with Load Balancer)!"
+            echo "Load Balancer IP: http://${LB_IP}"
+            echo "======================================================================"
+        else
+            # Allow public access directly to Cloud Run
+            echo "Setting Cloud Run IAM policy to allow public access..."
+            gcloud run services add-iam-policy-binding flask-redis-app \
+                --region="${REGION}" \
+                --member="allUsers" \
+                --role="roles/run.invoker"
+
+            # Allow direct public ingress
+            gcloud run services update flask-redis-app \
+                --ingress=all \
+                --region="${REGION}"
+
+            SERVICE_URL=$(gcloud run services describe flask-redis-app --region "${REGION}" --format="value(status.url)")
+            echo "======================================================================"
+            echo "Deployment Complete!"
+            echo "Cloud Run Service URL: ${SERVICE_URL}"
+            echo "======================================================================"
+        fi
+
+images:
+  - 'gcr.io/$PROJECT_ID/flask-redis-app:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/flask-redis-app:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

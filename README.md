@@ -94,3 +94,34 @@ spec:
         run.googleapis.com/vpc-access-egress: "private-ranges-only"
 ```
 The script dynamically replaces the image tag and private Redis IP address when deploying.
+
+---
+
+## CI/CD Deployment using GCP Cloud Build
+
+We have included a `cloudbuild.yaml` file to automate compilation and deployment through Google Cloud Build.
+
+### 1. Manual Invocation
+To trigger the build and deployment pipeline manually from your local command line:
+```bash
+gcloud builds submit --config=cloudbuild.yaml .
+```
+
+### 2. Automated Git Triggers (CI/CD)
+To set up continuous deployment upon pushing to your GitHub repository:
+1. Go to the **Cloud Build Triggers** console in GCP.
+2. Click **Create Trigger**.
+3. Link your GitHub repository `https://github.com/alpfr/cloudrun-redis-gcp.git`.
+4. Set the event type to **Push to a branch** (select `main`).
+5. Select **Cloud Build configuration file (yaml)** as the configuration type.
+6. Set the path to `cloudbuild.yaml`.
+7. Click **Create**.
+Now, any git push to `main` will automatically build your image, verify/provision Memorystore, and update your Cloud Run service!
+
+> [!IMPORTANT]
+> Ensure the **Cloud Build Service Account** in your GCP project has the following roles:
+> * `roles/run.admin` (Cloud Run Admin)
+> * `roles/redis.admin` (Cloud Memorystore Admin)
+> * `roles/compute.networkAdmin` (VPC Network/PSA Admin)
+> * `roles/iam.serviceAccountUser` (ActAs role for deployment)
+
